@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>OT List Extractor — Chordee Study</title>
+<meta name="description" content="Extract patient cases from a photo of the OT list and flag chordee / Byar's flap cases." />
+<meta name="theme-color" content="#0f172a" />
+<link rel="stylesheet" href="css/styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🩺</text></svg>" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🩺</span>
+    <div>
+      <h1>OT List Extractor</h1>
+      <p class="sub">Chordee correction in Byar's flap repair — case capture</p>
+    </div>
+  </div>
+  <button id="themeToggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="capture" role="tab">1 · Capture</button>
+  <button class="tab" data-tab="review" role="tab">2 · Review <span id="reviewCount" class="pill hidden">0</span></button>
+  <button class="tab" data-tab="saved" role="tab">Saved lists</button>
+  <button class="tab" data-tab="settings" role="tab">Settings</button>
+</nav>
+
+<main>
+
+<!-- ============================== CAPTURE ============================== -->
+<section id="tab-capture" class="tabpanel active">
+
+  <div class="card">
+    <h2>Upload the OT list photo</h2>
+    <p class="muted">Everything runs inside this browser. The photo is never uploaded anywhere.</p>
+
+    <div id="dropzone" class="dropzone">
+      <input id="fileInput" type="file" accept="image/*" capture="environment" hidden />
+      <div class="dz-inner">
+        <div class="dz-icon">📄</div>
+        <p><strong>Tap to take a photo</strong> or choose an image</p>
+        <p class="muted small">You can also paste (Ctrl/Cmd+V) or drag a file here</p>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label class="field">
+        <span>List date</span>
+        <input type="date" id="listDate" />
+      </label>
+      <label class="field">
+        <span>Unit / theatre <span class="muted small">(optional)</span></span>
+        <input type="text" id="listUnit" placeholder="e.g. Paed Surgery, OT 3" />
+      </label>
+    </div>
+  </div>
+
+  <div class="card hidden" id="previewCard">
+    <h2>Clean up the image</h2>
+    <p class="muted small">Good OCR is mostly about a good image. Crop tight around the table, keep the paper flat, avoid shadows.</p>
+
+    <div class="preview-wrap">
+      <canvas id="previewCanvas"></canvas>
+    </div>
+
+    <div class="controls">
+      <div class="ctrl">
+        <label for="rotate">Rotate</label>
+        <div class="btn-group">
+          <button class="mini" data-rotate="-90">⟲ 90°</button>
+          <button class="mini" data-rotate="90">⟳ 90°</button>
+          <button class="mini" data-rotate="180">180°</button>
+        </div>
+      </div>
+      <div class="ctrl">
+        <label for="contrast">Contrast <output id="contrastOut">1.4</output></label>
+        <input type="range" id="contrast" min="0.6" max="2.5" step="0.1" value="1.4" />
+      </div>
+      <div class="ctrl">
+        <label for="threshold">Sharpen text (adaptive threshold) <output id="thresholdOut">12</output></label>
+        <input type="range" id="threshold" min="0" max="40" step="1" value="12" />
+        <p class="muted small">0 turns thresholding off — try that for clean printed lists.</p>
+      </div>
+      <div class="ctrl">
+        <label for="psm">Page layout</label>
+        <select id="psm">
+          <option value="6" selected>Table / block of text (default)</option>
+          <option value="4">Single column, varying sizes</option>
+          <option value="3">Fully automatic</option>
+          <option value="11">Sparse text</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="runOcr" class="primary big">Extract cases</button>
+      <button id="clearImage" class="ghost">Remove image</button>
+    </div>
+
+    <div id="progressWrap" class="progress-wrap hidden">
+      <div class="bar"><div id="progressBar"></div></div>
+      <p id="progressText" class="muted small">Starting…</p>
+    </div>
+  </div>
+
+  <details class="card">
+    <summary><strong>Raw OCR text</strong> <span class="muted small">— useful when a row comes out wrong</span></summary>
+    <pre id="rawText" class="raw">Nothing yet.</pre>
+  </details>
+
+</section>
+
+<!-- ============================== REVIEW ============================== -->
+<section id="tab-review" class="tabpanel">
+
+  <div class="card" id="reviewEmpty">
+    <h2>No cases yet</h2>
+    <p class="muted">Extract an OT list photo first, then correct the rows here.</p>
+  </div>
+
+  <div id="reviewBody" class="hidden">
+    <div class="card summary-card">
+      <div class="summary">
+        <div class="stat">
+          <span class="stat-num" id="statTotal">0</span>
+          <span class="stat-lbl">cases on list</span>
+        </div>
+        <div class="stat mine">
+          <span class="stat-num" id="statMine">0</span>
+          <span class="stat-lbl">your cases</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="statDate">—</span>
+          <span class="stat-lbl">list date</span>
+        </div>
+      </div>
+      <div class="actions wrap">
+        <button id="saveList" class="primary">Save this list</button>
+        <button id="addRow" class="ghost">+ Add a row</button>
+        <button id="exportCsvMine" class="ghost">Export my cases (CSV)</button>
+        <button id="exportCsvAll" class="ghost">Export all (CSV)</button>
+        <label class="switch">
+          <input type="checkbox" id="onlyMine" />
+          <span>Show only my cases</span>
+        </label>
+      </div>
+      <p class="muted small">Every cell below is editable — tap and type. Nothing is saved until you press <strong>Save this list</strong>.</p>
+    </div>
+
+    <div class="table-wrap">
+      <table id="casesTable">
+        <thead>
+          <tr>
+            <th class="c-mine" title="Is this one of your study cases?">Mine</th>
+            <th class="c-sl">Sl</th>
+            <th>Name</th>
+            <th class="c-age">Age</th>
+            <th class="c-sex">Sex</th>
+            <th>Hosp. no.</th>
+            <th>Diagnosis</th>
+            <th>Procedure planned</th>
+            <th>Surgeon / unit</th>
+            <th class="c-act"></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+</section>
+
+<!-- ============================== SAVED ============================== -->
+<section id="tab-saved" class="tabpanel">
+  <div class="card">
+    <h2>Saved OT lists</h2>
+    <p class="muted small">Stored in this browser only (localStorage). Export a backup regularly — clearing site data wipes it.</p>
+    <div class="actions wrap">
+      <button id="exportAllJson" class="ghost">Download backup (JSON)</button>
+      <button id="exportAllCsv" class="ghost">Export every case (CSV)</button>
+      <button id="importJson" class="ghost">Restore from backup</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden />
+    </div>
+  </div>
+  <div id="savedList"></div>
+</section>
+
+<!-- ============================== SETTINGS ============================== -->
+<section id="tab-settings" class="tabpanel">
+  <div class="card">
+    <h2>What counts as one of my cases</h2>
+    <p class="muted small">A row is flagged when it matches a <strong>strong</strong> term, or a <strong>supporting</strong> term together with an operative word (repair, plasty, correction…). Matching is fuzzy, so OCR slips like “chordec” or “hypospodias” still get caught. One term per line.</p>
+
+    <label class="field">
+      <span>Strong terms — any hit flags the case</span>
+      <textarea id="strongTerms" rows="7"></textarea>
+    </label>
+    <label class="field">
+      <span>Supporting terms — flag only alongside an operative word</span>
+      <textarea id="supportTerms" rows="7"></textarea>
+    </label>
+    <div class="actions">
+      <button id="saveTerms" class="primary">Save terms</button>
+      <button id="resetTerms" class="ghost">Reset to defaults</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Data &amp; privacy</h2>
+    <p class="muted small">
+      Recognition happens with Tesseract running inside your browser — no image or patient detail leaves the device.
+      The first extraction downloads the OCR engine and English language data from a CDN (~15 MB); after that the browser
+      caches it and the app works offline. Records live in this browser's localStorage under this site's address only.
+    </p>
+    <div class="actions">
+      <button id="wipeAll" class="danger">Delete all saved lists</button>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <p class="muted small">Built for a single-user thesis workflow. Verify every extracted value against the original list before using it as study data.</p>
+</footer>
+
+<div id="toast" class="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
