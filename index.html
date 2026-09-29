@@ -64,10 +64,25 @@
     <p class="muted small">Good OCR is mostly about a good image. Crop tight around the table, keep the paper flat, avoid shadows.</p>
 
     <div class="preview-wrap">
-      <canvas id="previewCanvas"></canvas>
+      <div class="canvas-stage">
+        <canvas id="previewCanvas"></canvas>
+        <div id="cropBox" class="crop-box hidden"></div>
+      </div>
     </div>
 
+    <p class="muted small crop-hint">
+      <strong>Drag on the image to select one list.</strong> If you photographed two sheets,
+      select just one table — extract it, then come back and select the other.
+    </p>
+
     <div class="controls">
+      <div class="ctrl">
+        <label>Selection</label>
+        <div class="btn-group">
+          <button class="mini" id="cropReset">Use whole image</button>
+          <span id="cropInfo" class="muted small">whole image</span>
+        </div>
+      </div>
       <div class="ctrl">
         <label for="rotate">Rotate</label>
         <div class="btn-group">
@@ -86,7 +101,7 @@
         <p class="muted small">0 turns thresholding off — try that for clean printed lists.</p>
       </div>
       <div class="ctrl">
-        <label for="psm">Page layout</label>
+        <label for="psm">Page layout <span class="muted small">(only used if no table grid is found)</span></label>
         <select id="psm">
           <option value="6" selected>Table / block of text (default)</option>
           <option value="4">Single column, varying sizes</option>
@@ -96,8 +111,12 @@
       </div>
     </div>
 
-    <div class="actions">
+    <div class="actions wrap">
       <button id="runOcr" class="primary big">Extract cases</button>
+      <label class="switch">
+        <input type="checkbox" id="appendMode" />
+        <span>Add to cases already in Review</span>
+      </label>
       <button id="clearImage" class="ghost">Remove image</button>
     </div>
 
@@ -153,20 +172,7 @@
 
     <div class="table-wrap">
       <table id="casesTable">
-        <thead>
-          <tr>
-            <th class="c-mine" title="Is this one of your study cases?">Mine</th>
-            <th class="c-sl">Sl</th>
-            <th>Name</th>
-            <th class="c-age">Age</th>
-            <th class="c-sex">Sex</th>
-            <th>Hosp. no.</th>
-            <th>Diagnosis</th>
-            <th>Procedure planned</th>
-            <th>Surgeon / unit</th>
-            <th class="c-act"></th>
-          </tr>
-        </thead>
+        <thead><tr id="casesHead"></tr></thead>
         <tbody></tbody>
       </table>
     </div>
