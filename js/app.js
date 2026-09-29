@@ -1,25 +1,55 @@
-/* UI glue: capture → preprocess → OCR → parse → review → save. */
+/* UI glue: capture → crop → preprocess → grid read (or OCR fallback) → review → save. */
 
 import { fileToBitmap, preprocess } from './preprocess.js';
 import { recognise } from './ocr.js';
 import { parseCases, flagCase, DEFAULT_STRONG, DEFAULT_SUPPORT } from './parse.js';
+import { deskewRegion, detectTable, eraseTableLines, extractTableRows, splitAgeSex } from './table.js';
 import * as store from './storage.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+/** Review-table columns, in display order. */
+export const FIELDS = [
+  { key: 'serial', label: 'S.No', cls: 'narrow' },
+  { key: 'name', label: 'Name' },
+  { key: 'age', label: 'Age', cls: 'narrow' },
+  { key: 'sex', label: 'Sex', cls: 'narrow' },
+  { key: 'crNo', label: 'CR No.' },
+  { key: 'ward', label: 'Ward / bed' },
+  { key: 'diagnosis', label: 'Diagnosis' },
+  { key: 'procedure', label: 'Procedure' },
+  { key: 'duration', label: 'Duration', cls: 'narrow' },
+  { key: 'special', label: 'Special requirement' },
+  { key: 'surgeon', label: 'Surgeon / team' },
+  { key: 'anaesthesia', label: 'Anaes.', cls: 'narrow' },
+  { key: 'serology', label: 'Serology', cls: 'narrow' },
+  { key: 'bloodGroup', label: 'Blood group' },
+  { key: 'position', label: 'Position' },
+  { key: 'remarks', label: 'Remarks' },
+];
 
 const state = {
   bitmap: null,
   canvas: null,
   thumb: '',
   rows: [],
-  editingId: null,      // set when a saved list is reopened
+  editingId: null,
+  crop: null,                       // in preprocessed-canvas pixels
   opts: { rotate: 0, contrast: 1.4, threshold: 12, psm: '6' },
 };
 
+const blankRow = () => ({
+  id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+  serial: '', name: '', age: '', sex: '', crNo: '', ward: '',
+  diagnosis: '', procedure: '', duration: '', special: '', surgeon: '',
+  anaesthesia: '', serology: '', bloodGroup: '', position: '', remarks: '',
+  raw: '', mine: false, matched: [], lowConf: [], manualFlag: false,
+});
+
 /* ------------------------------------------------------------------ chrome */
 
-function toast(msg, ms = 2600) {
+function toast(msg, ms = 3200) {
   const el = $('#toast');
   el.textContent = msg;
   el.classList.add('show');
@@ -33,7 +63,6 @@ function showTab(name) {
   if (name === 'saved') renderSaved();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
-
 $$('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
 
 function applyTheme(theme) {
@@ -72,6 +101,7 @@ async function loadFile(file) {
   try {
     state.bitmap = await fileToBitmap(file);
     state.opts.rotate = 0;
+    state.crop = null;
     state.thumb = makeThumb(state.bitmap);
     $('#previewCard').classList.remove('hidden');
     renderPreview();
@@ -103,11 +133,13 @@ function renderPreview() {
     target.width = state.canvas.width;
     target.height = state.canvas.height;
     target.getContext('2d').drawImage(state.canvas, 0, 0);
+    drawCropBox();
   }, 120);
 }
 
 $$('[data-rotate]').forEach((btn) => btn.addEventListener('click', () => {
   state.opts.rotate = (state.opts.rotate + Number(btn.dataset.rotate) + 360) % 360;
+  state.crop = null;                 // rotation invalidates the old selection
   renderPreview();
 }));
 
@@ -127,9 +159,73 @@ $('#clearImage').addEventListener('click', () => {
   state.bitmap = null;
   state.canvas = null;
   state.thumb = '';
+  state.crop = null;
   fileInput.value = '';
   $('#previewCard').classList.add('hidden');
 });
+
+/* ------------------------------------------------------------ crop select */
+
+const previewCanvas = $('#previewCanvas');
+const cropBox = $('#cropBox');
+let dragStart = null;
+
+const canvasPoint = (ev) => {
+  const rect = previewCanvas.getBoundingClientRect();
+  return {
+    x: ((ev.clientX - rect.left) / rect.width) * previewCanvas.width,
+    y: ((ev.clientY - rect.top) / rect.height) * previewCanvas.height,
+  };
+};
+
+previewCanvas.addEventListener('pointerdown', (ev) => {
+  if (!state.canvas) return;
+  previewCanvas.setPointerCapture(ev.pointerId);
+  dragStart = canvasPoint(ev);
+  state.crop = null;
+  drawCropBox();
+});
+
+previewCanvas.addEventListener('pointermove', (ev) => {
+  if (!dragStart) return;
+  const p = canvasPoint(ev);
+  state.crop = {
+    x0: Math.min(dragStart.x, p.x), y0: Math.min(dragStart.y, p.y),
+    x1: Math.max(dragStart.x, p.x), y1: Math.max(dragStart.y, p.y),
+  };
+  drawCropBox();
+});
+
+previewCanvas.addEventListener('pointerup', () => {
+  dragStart = null;
+  // A tap rather than a drag means "no selection".
+  if (state.crop && (state.crop.x1 - state.crop.x0 < 40 || state.crop.y1 - state.crop.y0 < 40)) {
+    state.crop = null;
+  }
+  drawCropBox();
+});
+
+$('#cropReset').addEventListener('click', () => { state.crop = null; drawCropBox(); });
+
+function drawCropBox() {
+  const info = $('#cropInfo');
+  if (!state.crop || !state.canvas) {
+    cropBox.classList.add('hidden');
+    info.textContent = 'whole image';
+    return;
+  }
+  const rect = previewCanvas.getBoundingClientRect();
+  const stage = previewCanvas.parentElement.getBoundingClientRect();
+  const sx = rect.width / previewCanvas.width;
+  const sy = rect.height / previewCanvas.height;
+  cropBox.classList.remove('hidden');
+  cropBox.style.left = `${(rect.left - stage.left) + state.crop.x0 * sx}px`;
+  cropBox.style.top = `${(rect.top - stage.top) + state.crop.y0 * sy}px`;
+  cropBox.style.width = `${(state.crop.x1 - state.crop.x0) * sx}px`;
+  cropBox.style.height = `${(state.crop.y1 - state.crop.y0) * sy}px`;
+  info.textContent = `${Math.round(state.crop.x1 - state.crop.x0)} × ${Math.round(state.crop.y1 - state.crop.y0)} px selected`;
+}
+window.addEventListener('resize', drawCropBox);
 
 /* --------------------------------------------------------------------- OCR */
 
@@ -142,26 +238,17 @@ $('#runOcr').addEventListener('click', async () => {
   setProgress(0.02, 'Loading the OCR engine (first run downloads it)…');
 
   try {
-    const { text, lines, rejected } = await recognise(state.canvas, {
-      psm: state.opts.psm,
-      onProgress: (p, label) => setProgress(p, label),
-    });
-
-    const noiseNote = rejected.length
-      ? `\n\n— ${rejected.length} line(s) ignored as noise —\n${rejected.map((r) => r.text).join('\n')}`
-      : '';
-    $('#rawText').textContent = (text.trim() || '(nothing recognised)') + noiseNote;
-    const rows = parseCases(lines, currentTerms());
-
-    if (!rows.length) {
-      toast('No rows recognised — try rotating, or set “Sharpen text” to 0.');
+    const result = await extract();
+    if (!result.rows.length) {
+      toast('No cases found — try selecting just the table, or set “Sharpen text” to 0.');
     } else {
-      state.rows = rows;
-      state.editingId = null;
+      const append = $('#appendMode').checked;
+      state.rows = append ? [...state.rows, ...result.rows] : result.rows;
+      if (!append) state.editingId = null;
       renderReview();
       showTab('review');
-      const mine = rows.filter((r) => r.mine).length;
-      toast(`${rows.length} case${rows.length === 1 ? '' : 's'} found · ${mine} flagged as yours`);
+      const mine = result.rows.filter((r) => r.mine).length;
+      toast(`${result.rows.length} case${result.rows.length === 1 ? '' : 's'} read via ${result.path} · ${mine} flagged as yours`);
     }
   } catch (err) {
     console.error(err);
@@ -175,6 +262,78 @@ $('#runOcr').addEventListener('click', async () => {
   }
 });
 
+/**
+ * Read the selected region. A ruled table is read cell by cell from its grid;
+ * anything else falls back to inferring structure from the text itself.
+ */
+async function extract() {
+  const onProgress = (p, label) => setProgress(p, label);
+  const terms = currentTerms();
+
+  setProgress(0.05, 'Straightening the page…');
+  const deskewed = deskewRegion(state.canvas, state.crop || {
+    x0: 0, y0: 0, x1: state.canvas.width, y1: state.canvas.height,
+  });
+
+  const table = detectTable(deskewed);
+
+  if (table && table.xs.length >= 5 && table.ys.length >= 2) {
+    setProgress(0.1, 'Found the table grid — reading cells…');
+    eraseTableLines(deskewed, table);
+    const { lines, text } = await recognise(deskewed.canvas, { psm: '6', raw: true, onProgress });
+    const { rows: records, mapping } = extractTableRows(lines, table);
+
+    $('#rawText').textContent =
+      `Read as a ruled table: ${table.xs.length - 1} columns × ${table.ys.length - 1} bands, `
+      + `page straightened by ${deskewed.skew.toFixed(1)}°.\n`
+      + `Columns found: ${mapping.filter(Boolean).join(', ')}\n\n${text.trim()}`;
+
+    const rows = records.map((rec) => {
+      const row = blankRow();
+      Object.assign(row, rec.cells);
+      const { age, sex } = splitAgeSex(rec.cells.ageSex);
+      row.age = age;
+      row.sex = sex;
+      row.raw = Object.values(rec.cells).join(' ');
+      for (const key of ['name', 'crNo', 'diagnosis', 'procedure']) {
+        if (!row[key]) row.lowConf.push(key);
+      }
+      const { mine, matched } = flagCase(row, terms);
+      row.mine = mine;
+      row.matched = matched;
+      return row;
+    });
+
+    if (rows.length) return { rows, path: 'table grid' };
+  }
+
+  // Fallback: no usable grid, so read it as free text.
+  setProgress(0.1, 'No table grid found — reading as text…');
+  const { lines, text, rejected } = await recognise(deskewed.canvas, { psm: state.opts.psm, onProgress });
+  const noiseNote = rejected.length
+    ? `\n\n— ${rejected.length} line(s) ignored as noise —\n${rejected.map((r) => r.text).join('\n')}`
+    : '';
+  $('#rawText').textContent = `Read as free text (no ruled grid detected).\n\n${text.trim() || '(nothing recognised)'}${noiseNote}`;
+
+  const rows = parseCases(lines, terms).map((c) => {
+    const row = blankRow();
+    row.serial = c.serial;
+    row.name = c.name;
+    row.age = c.age;
+    row.sex = c.sex;
+    row.crNo = c.hospNo;
+    row.diagnosis = c.diagnosis;
+    row.procedure = c.procedure;
+    row.surgeon = c.surgeon;
+    row.raw = c.raw;
+    row.mine = c.mine;
+    row.matched = c.matched;
+    row.lowConf = c.lowConf;
+    return row;
+  });
+  return { rows, path: 'free text' };
+}
+
 function setProgress(p, label) {
   $('#progressBar').style.width = `${Math.round(Math.min(1, Math.max(0, p)) * 100)}%`;
   if (label) $('#progressText').textContent = label;
@@ -182,9 +341,17 @@ function setProgress(p, label) {
 
 /* ------------------------------------------------------------------ review */
 
-const FIELDS = ['serial', 'name', 'age', 'sex', 'hospNo', 'diagnosis', 'procedure', 'surgeon'];
+function renderHead() {
+  const head = $('#casesHead');
+  if (head.children.length) return;
+  head.innerHTML =
+    '<th class="c-mine" title="Is this one of your study cases?">Mine</th>'
+    + FIELDS.map((f) => `<th class="${f.cls || ''}">${f.label}</th>`).join('')
+    + '<th class="c-act"></th>';
+}
 
 function renderReview() {
+  renderHead();
   const has = state.rows.length > 0;
   $('#reviewEmpty').classList.toggle('hidden', has);
   $('#reviewBody').classList.toggle('hidden', !has);
@@ -216,20 +383,21 @@ function renderReview() {
       const td = document.createElement('td');
       td.contentEditable = 'true';
       td.spellcheck = false;
-      td.dataset.field = field;
-      td.textContent = row[field] || '';
-      if (row.lowConf.includes(field)) td.classList.add('low-conf');
+      td.dataset.field = field.key;
+      if (field.cls) td.className = field.cls;
+      td.textContent = row[field.key] || '';
+      if (row.lowConf.includes(field.key)) td.classList.add('low-conf');
 
       td.addEventListener('input', () => {
-        row[field] = td.textContent.trim();
+        row[field.key] = td.textContent.trim();
         td.classList.remove('low-conf');
       });
       td.addEventListener('blur', () => {
-        if (field === 'diagnosis' || field === 'procedure') refreshFlag(row, tr);
+        if (field.key === 'diagnosis' || field.key === 'procedure') refreshFlag(row, tr);
       });
       tr.appendChild(td);
 
-      if (field === 'procedure' && row.matched?.length) {
+      if (field.key === 'procedure' && row.matched?.length) {
         const note = document.createElement('span');
         note.className = 'match-note';
         note.textContent = `matched: ${row.matched.join(', ')}`;
@@ -272,12 +440,9 @@ function updateStats() {
 $('#onlyMine').addEventListener('change', renderReview);
 
 $('#addRow').addEventListener('click', () => {
-  state.rows.push({
-    id: `${Date.now().toString(36)}-manual-${Math.random().toString(36).slice(2, 7)}`,
-    serial: String(state.rows.length + 1),
-    name: '', age: '', sex: '', hospNo: '', diagnosis: '', procedure: '', surgeon: '',
-    raw: '', mine: false, matched: [], lowConf: [], manualFlag: false,
-  });
+  const row = blankRow();
+  row.serial = String(state.rows.length + 1);
+  state.rows.push(row);
   renderReview();
 });
 
@@ -340,7 +505,7 @@ function renderSaved() {
       </div>`;
 
     el.querySelector('[data-act="open"]').addEventListener('click', () => {
-      state.rows = entry.rows;
+      state.rows = entry.rows.map((r) => ({ ...blankRow(), ...r }));
       state.editingId = entry.id;
       state.thumb = entry.thumb || '';
       $('#listDate').value = entry.listDate;

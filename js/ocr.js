@@ -33,9 +33,11 @@ function capitalise(s = '') {
 
 /**
  * @param {HTMLCanvasElement} canvas  preprocessed image
- * @param {{psm?:string, onProgress?:Function}} opts
- * @returns {Promise<{text:string, lines:Array}>}
- *          lines: [{ text, bbox, words:[{text, bbox, confidence}] }]
+ * @param {{psm?:string, raw?:boolean, onProgress?:Function}} opts
+ *        raw — skip noise filtering. Used by the grid reader, where the table's
+ *        own rules supply the structure and a short cell like "GA" or "1 HR" is
+ *        real content that the line filter would otherwise discard.
+ * @returns {Promise<{text:string, lines:Array, rejected:Array}>}
  */
 export async function recognise(canvas, opts = {}) {
   const worker = await getWorker(opts.onProgress);
@@ -47,7 +49,7 @@ export async function recognise(canvas, opts = {}) {
 
   const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
   const rejected = [];
-  return { text: data.text || '', lines: extractLines(data, rejected), rejected };
+  return { text: data.text || '', lines: extractLines(data, rejected, opts.raw === true), rejected };
 }
 
 const WORD_CONF_FLOOR = 30;
@@ -94,12 +96,12 @@ function isJunkLine(text, confidence) {
  * tesseract.js has moved the line structure around between majors, so dig for it
  * rather than trusting one shape; fall back to plain text if all else fails.
  */
-function extractLines(data, rejected) {
+function extractLines(data, rejected, raw = false) {
   const lines = [];
 
   const push = (line) => {
     const words = (line.words || [])
-      .filter(keepWord)
+      .filter((w) => (raw ? !!(w.text && w.text.trim()) : keepWord(w)))
       .map((w) => ({
         text: w.text.trim(),
         bbox: w.bbox || null,
@@ -109,7 +111,7 @@ function extractLines(data, rejected) {
     const text = (words.length ? words.map((w) => w.text).join(' ') : line.text || '').replace(/\s+$/, '');
     const confidence = typeof line.confidence === 'number' ? line.confidence : null;
     if (!text.trim()) return;
-    if (isJunkLine(text, confidence)) {
+    if (!raw && isJunkLine(text, confidence)) {
       rejected.push({ text, confidence });
       return;
     }

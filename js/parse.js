@@ -118,9 +118,15 @@ function levenshtein(a, b) {
  *
  * Comparison happens on space-stripped text because OCR both mangles letters and
  * invents word breaks: "Byar's flap" can come back as "Byar s flcp". Windows of
- * n-1, n and n+1 words cover the split/joined cases, and the edit-distance budget
- * scales with term length (25%), so "chordee" tolerates one slip and longer terms
- * tolerate more.
+ * n-1, n and n+1 words cover the split/joined cases.
+ *
+ * Short tokens are never fuzzed. Surgical abbreviations are three letters and
+ * differ from each other by one: fuzzing "TIP repair" (tubularised incised
+ * plate) happily matches "TEF repair" (tracheo-oesophageal fistula), which is a
+ * different operation on a different patient. A term containing a short token
+ * therefore requires that token literally, and a term that IS short is matched
+ * exactly or not at all. Precision matters more than recall here — a missed row
+ * is one tick in the review table, a false one is a wrong case in the study.
  */
 export function fuzzyFind(haystack, term) {
   const hay = norm(haystack);
@@ -128,13 +134,21 @@ export function fuzzyFind(haystack, term) {
   if (!hay || !needle) return null;
   if (hay.includes(needle)) return term;
 
+  const needleTokens = needle.split(' ');
+  const shortTokens = needleTokens.filter((t) => t.length <= 3);
+  if (shortTokens.length) {
+    // Every short token must appear verbatim, as a whole word.
+    const hayTokens = new Set(hay.split(' '));
+    if (!shortTokens.every((t) => hayTokens.has(t))) return null;
+  }
+
   const needleTight = tight(needle);
-  if (needleTight.length < 4) return null;          // too short to fuzz safely
+  if (needleTight.length < 5) return null;
   if (tight(hay).includes(needleTight)) return term;
 
   const words = hay.split(' ');
-  const n = needle.split(' ').length;
-  const tolerance = Math.max(1, Math.floor(needleTight.length * 0.25));
+  const n = needleTokens.length;
+  const tolerance = needleTight.length < 12 ? 1 : needleTight.length < 20 ? 2 : 3;
   const sizes = [...new Set([n, n + 1, Math.max(1, n - 1)])];
 
   for (const size of sizes) {
