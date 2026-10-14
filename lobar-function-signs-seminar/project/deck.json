@@ -1,0 +1,122 @@
+{
+  "v": 4,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-14T09:00:00Z"
+  },
+  "lists": "css",
+  "title": "Lobar Function Signs of the Brain",
+  "order": [
+    "cover",
+    "objectives",
+    "relevance",
+    "principles",
+    "sec-frontal",
+    "fr-anatomy",
+    "fr-motor",
+    "fr-sma-fef",
+    "fr-broca",
+    "fr-prefrontal",
+    "fr-other",
+    "fr-release",
+    "fr-tests-motor",
+    "fr-tests-exec",
+    "fr-bedside",
+    "sec-parietal",
+    "pa-anatomy",
+    "pa-functions",
+    "pa-sensory",
+    "pa-dominant",
+    "pa-apraxia",
+    "pa-nondominant",
+    "pa-neglect",
+    "pa-balint-fields",
+    "pa-tests",
+    "sec-temporal",
+    "te-anatomy",
+    "te-functions",
+    "te-lateral",
+    "te-mesial",
+    "te-fields",
+    "sec-occipital",
+    "oc-anatomy",
+    "oc-signs",
+    "oc-agnosia",
+    "insula",
+    "callosal",
+    "aphasia",
+    "seizures",
+    "sec-vascular",
+    "va-overview",
+    "va-territories",
+    "va-ica",
+    "va-mca-anatomy",
+    "va-mca-syndromes",
+    "va-aca",
+    "va-pca",
+    "va-thalamus",
+    "va-capsule",
+    "va-lacunar",
+    "va-midbrain",
+    "va-pons",
+    "va-medulla",
+    "surgery-eloquent",
+    "surgery-mapping",
+    "summary",
+    "takehome",
+    "refs1",
+    "refs2",
+    "refs3",
+    "refs4",
+    "refs5"
+  ],
+  "sections": {
+    "s0": {
+      "description": "Introduction: why lobar localization matters and the organizing principles",
+      "start": "cover"
+    },
+    "s1": {
+      "description": "Frontal lobe: motor, eye movement, expressive language, executive and behavioural signs",
+      "start": "sec-frontal"
+    },
+    "s2": {
+      "description": "Parietal lobe: cortical sensory loss, dominant and non-dominant syndromes, Balint",
+      "start": "sec-parietal"
+    },
+    "s3": {
+      "description": "Temporal lobe: auditory, language, memory, limbic signs and Meyer's loop",
+      "start": "sec-temporal"
+    },
+    "s4": {
+      "description": "Occipital lobe: field defects, cortical blindness and visual agnosias",
+      "start": "sec-occipital"
+    },
+    "s5": {
+      "description": "Integration: insula, callosal disconnection, aphasia types and seizure semiology",
+      "start": "insula"
+    },
+    "s6": {
+      "description": "Blood supply of the brain and localization of the infarct-related artery",
+      "start": "sec-vascular"
+    },
+    "s7": {
+      "description": "Neurosurgical application: eloquence grading and functional mapping",
+      "start": "surgery-eloquent"
+    },
+    "s8": {
+      "description": "Summary, take-home points and references",
+      "start": "summary"
+    }
+  },
+  "faces": {
+    "source-serif-4": {
+      "family": "Source Serif 4",
+      "href": "https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400..700&display=swap"
+    },
+    "ibm-plex-sans": {
+      "family": "IBM Plex Sans",
+      "href": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap"
+    }
+  },
+  "designSystems": []
+}
